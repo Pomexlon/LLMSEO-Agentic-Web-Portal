@@ -1,0 +1,17 @@
+{
+  "name": "LLMSEO-Agentic-Web-Portal",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^15.3.5",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "proxycrawl": "^2.5.0",
+    "cheerio": "^1.0.0-rc.12"
+  }
+}
+
