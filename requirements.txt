@@ -1,1 +1,9 @@
+<<<<<<< HEAD
 wheel==0.45.1
+=======
+streamlit
+openai
+beautifulsoup4
+requests
+python-dotenv
+>>>>>>> 4c1270292fb309a4b40aeb20ae27beebe3dcd556
