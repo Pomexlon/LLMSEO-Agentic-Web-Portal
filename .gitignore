@@ -3,3 +3,8 @@ node_modules/
 node_modules/
 .env
 .env
+.next
+node_modules
+.env
+.env.local
+.DS_Store
