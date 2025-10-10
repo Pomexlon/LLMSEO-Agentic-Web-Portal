@@ -1,53 +1,65 @@
+require('dotenv').config();
 const { CrawlingAPI } = require('proxycrawl');
 const cheerio = require('cheerio');
 const fs = require('fs');
 
-const api = new CrawlingAPI({ token: 'A9IPVVqYJdA2-tIO3Hrt5Q' });
+const token = process.env.CRAWLBASE_TOKEN;
+if (!token) { console.error('Missing CRAWLBASE_TOKEN in .env'); process.exit(1); }
+const api = new CrawlingAPI({ token });
 
-const queries = [
-  'oxygen concentrators UK',
-  'best portable oxygen concentrators UK',
-  'NHS approved oxygen concentrators UK'
-];
+const input = (process.env.KEYWORDS || '').trim();
+const queries = input
+  ? input.split(',').map(s => s.trim()).filter(Boolean)
+  : [
+      'oxygen concentrators UK',
+      'best portable oxygen concentrators UK',
+      'NHS approved oxygen concentrators UK'
+    ];
 
 async function crawlQueries() {
-  let allResults = {};
-
-  for (let query of queries) {
-    const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-
+  const allResults = {};
+  for (const query of queries) {
+    const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en-GB`;
     try {
       const response = await api.get(url);
-      if (response.statusCode === 200) {
-        console.log(`\n✅ Results for "${query}":\n`);
+      if (response.statusCode !== 200) {
+        console.error(`Error for "${query}": HTTP ${response.statusCode}`);
+        continue;
+      }
+      const $ = cheerio.load(response.body);
+      const results = [];
 
-        const $ = cheerio.load(response.body);
-        let results = [];
+      $('div.ezO2md').each((i, el) => {
+        const title = $(el).find('span.CVA68e').text().trim();
+        let link = $(el).find('a').attr('href');
+        if (link && link.startsWith('/url?q=')) {
+          link = decodeURIComponent(link.split('/url?q=')[1].split('&sa=')[0]);
+        }
+        if (title && link) results.push({ rank: i + 1, title, link });
+      });
 
-        $('div.ezO2md').each((index, element) => {
-          const title = $(element).find('span.CVA68e').text();
-          let link = $(element).find('a').attr('href');
+      if (results.length === 0) {
+        $('a h3').each((i, el) => {
+          const h3 = $(el);
+          const a = h3.closest('a');
+          const title = h3.text().trim();
+          let link = a.attr('href');
           if (link && link.startsWith('/url?q=')) {
             link = decodeURIComponent(link.split('/url?q=')[1].split('&sa=')[0]);
           }
-          results.push({ rank: index + 1, title, link });
-          console.log(`${index + 1}. ${title}\nDirect Link: ${link}\n`);
+          if (title && link) results.push({ rank: i + 1, title, link });
         });
-
-        allResults[query] = results;
-
-      } else {
-        console.error(`🚨 Error (${query}):`, response.statusCode);
       }
-    } catch (error) {
-      console.error(`Request failed (${query}):`, error);
+
+      allResults[query] = results;
+      console.log(`✅ ${query}: ${results.length} results`);
+    } catch (err) {
+      console.error(`Request failed (${query}):`, err?.message || err);
     }
   }
 
-  // Clearly save results to JSON file
   fs.writeFileSync('results.json', JSON.stringify(allResults, null, 2));
-  console.log('\n📁 Results successfully saved in results.json\n');
+  console.log('💾 Saved results.json');
 }
 
 crawlQueries();
-

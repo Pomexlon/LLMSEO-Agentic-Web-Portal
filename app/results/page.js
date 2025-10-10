@@ -5,34 +5,38 @@ export default function ResultsPage() {
   const [data, setData] = useState(null);
 
   useEffect(() => {
-    fetch('/api/results')
-      .then(response => response.json())
-      .then(data => setData(data))
-      .catch(error => console.error('Error fetching data:', error));
+    const ls = localStorage.getItem('llmseo_last_results');
+    if (ls) setData(JSON.parse(ls));
+    else setData({});
   }, []);
 
-  if (!data) {
-    return <div className="p-8">Loading...</div>;
-  }
+  if (data === null) return <div style={{padding:24}}>Loading…</div>;
 
+  const queries = Object.keys(data || {});
   return (
-    <div className="p-8 font-sans">
-      <h1 className="text-2xl font-bold mb-4">🔍 LLMSEO SERP Results</h1>
-      {Object.keys(data).map(query => (
-        <div key={query} className="mt-6">
-          <h2 className="text-xl font-semibold capitalize mb-3">{query}</h2>
-          <ol className="mt-2 list-decimal pl-6 space-y-2">
-            {data[query].map(result => (
-              <li key={result.rank}>
-                <a className="text-blue-600 hover:underline" href={result.link} target="_blank" rel="noopener noreferrer">
-                  {result.title}
+    <div style={{fontFamily:'Inter, system-ui, Arial', padding: 24, maxWidth: 980, margin: '0 auto'}}>
+      <header style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 24}}>
+        <h1 style={{fontSize: 28, fontWeight: 700}}>LLMSEO • SERP Dashboard</h1>
+        <a href="/" style={{textDecoration:'none', fontSize:14}}>Home</a>
+      </header>
+
+      {!queries.length && <div>No results yet. Go back and run a crawl.</div>}
+
+      {queries.map((q) => (
+        <section key={q} style={{background:'#fff', border:'1px solid #eee', borderRadius:14, padding:18, marginBottom:20, boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
+          <h2 style={{fontSize:20, marginBottom:10}}>{q}</h2>
+          <ol style={{paddingLeft:20, lineHeight:1.6}}>
+            {(data[q] || []).map((r) => (
+              <li key={`${r.rank}-${r.link}`}>
+                <a href={r.link} target="_blank" rel="noreferrer" style={{color:'#2563eb', textDecoration:'none'}}>
+                  {r.title || r.link}
                 </a>
+                <span style={{color:'#666'}}>  • rank #{r.rank}</span>
               </li>
             ))}
           </ol>
-        </div>
+        </section>
       ))}
     </div>
   );
 }
-

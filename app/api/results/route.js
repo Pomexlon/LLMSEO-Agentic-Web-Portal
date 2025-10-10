@@ -4,14 +4,11 @@ import path from 'path';
 
 export async function GET() {
   try {
-    const dataPath = path.join(process.cwd(), 'results.json');
-    const jsonData = fs.readFileSync(dataPath, 'utf-8');
-    const results = JSON.parse(jsonData);
-    
-    return NextResponse.json(results);
-  } catch (error) {
-    console.error('Error reading JSON file:', error);
-    return NextResponse.json({ error: 'Error reading JSON file' }, { status: 500 });
+    const filePath = path.join(process.cwd(), 'results.json');
+    const raw = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '{}';
+    const data = JSON.parse(raw || '{}');
+    return NextResponse.json(data);
+  } catch {
+    return NextResponse.json({ error: 'Failed to read results' }, { status: 500 });
   }
 }
-
