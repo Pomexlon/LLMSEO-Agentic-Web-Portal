@@ -1,5 +1,5 @@
 # app.py
-import os, io, json
+import os, io, json, datetime, pathlib
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -9,12 +9,15 @@ import pandas as pd
 from serp_agent import run_serp_queries
 from seo_audit_agent import audit_url
 from llmseo_agent import draft_titles_and_meta, draft_faqs_and_schema
+from kpi_scoring import compute_kpis  # NEW
+
+DATA_DIR = pathlib.Path("data")
+DATA_DIR.mkdir(exist_ok=True)
 
 st.set_page_config(page_title="LLMSEO Agentic Web Portal", layout="wide")
 st.title("🚀 LLMSEO Agentic Web Portal")
-st.caption("Enter a domain and keywords to run SERP, on-page audits, and LLM-powered recommendations.")
+st.caption("Enter a domain and keywords to run SERP, on-page audits, KPIs, LVI %, and LLM recommendations.")
 
-# Sidebar: env status
 with st.sidebar:
     st.subheader("Environment")
     st.write("**OPENAI_API_KEY**:", "✅ set" if os.getenv("OPENAI_API_KEY") else "⚠️ missing")
@@ -23,7 +26,6 @@ with st.sidebar:
     st.divider()
     st.markdown("Keep keys in `.env` and **do not commit** them.")
 
-# Inputs
 col1, col2 = st.columns([2,1])
 with col1:
     domain = st.text_input("Target domain (e.g., onoxygen.co.uk)", value="")
@@ -31,21 +33,22 @@ with col1:
 with col2:
     location = st.selectbox("Search location", ["uk","us","de","fr","es"], index=0)
 
-keywords = st.text_area("Keywords (one per line)", value="portable oxygen concentrator uk\ninogen rove 6 uk\nrefurbished oxygen concentrator uk")
-competitors = st.text_area("Competitors (optional, one per line)", value="theoxygenstore.com\nportableoxygen.co.uk")
+keywords = st.text_area("Keywords (one per line)",
+                        value="portable oxygen concentrator uk\ninogen rove 6 uk\nrefurbished oxygen concentrator uk")
+competitors = st.text_area("Competitors (optional, one per line)",
+                           value="theoxygenstore.com\nportableoxygen.co.uk")
 
-# Buttons
 b1, b2, b3 = st.columns(3)
 run_serp = b1.button("🔎 Run SERP")
 run_audit = b2.button("🧪 Run Audit")
 run_plan = b3.button("🧠 Generate LLM Plan")
 
-# State
 if "serp_df" not in st.session_state: st.session_state["serp_df"] = pd.DataFrame()
 if "audit_result" not in st.session_state: st.session_state["audit_result"] = {}
+if "kpi" not in st.session_state: st.session_state["kpi"] = {}
 if "plan" not in st.session_state: st.session_state["plan"] = {}
 
-# SERP
+# --- SERP ---
 if run_serp:
     if not domain or not keywords.strip():
         st.error("Please enter a domain and at least one keyword.")
@@ -57,12 +60,20 @@ if run_serp:
 
         st.subheader("SERP Results (Top 10 per keyword)")
         st.dataframe(df, use_container_width=True)
-
         if not df.empty:
             csv = df.to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Download SERP CSV", data=csv, file_name="serp_results.csv", mime="text/csv")
 
-# Audit
+# Helper: derive a simple serp_score hint until we compute avg rank
+def serp_score_hint(df: pd.DataFrame, domain: str) -> int:
+    if df.empty: return 60
+    ours = df[df["our_site"] == True]
+    if ours.empty: return 40
+    # Better average position => higher score (very crude)
+    avg_pos = ours["position"].mean()
+    return max(40, min(100, int(100 - (avg_pos-1)*8)))  # pos1->100, pos5->68, pos10->28->clamped to 40
+
+# --- AUDIT + KPIs/LVI ---
 if run_audit:
     if not target_url:
         st.error("Enter a specific URL to audit (e.g., a product or guide page).")
@@ -70,17 +81,47 @@ if run_audit:
         res = audit_url(target_url)
         st.session_state["audit_result"] = res
 
-        st.subheader("On-page Audit")
+        st.subheader("On-page Audit (raw)")
         if "error" in res:
             st.error(f"Fetch error: {res['error']}")
         else:
             meta_cols = ["url","title","meta_description","h1_count","h2_count","img_count",
                          "img_alt_coverage_percent","internal_links","external_links","jsonld_types","lvi"]
             st.json({k:res.get(k) for k in meta_cols})
-            st.caption("LVI breakdown (prototype scoring):")
+            st.caption("LVI breakdown (prototype subscores):")
             st.json(res.get("lvi_breakdown", {}))
 
-# LLM Plan
+            # Compute KPIs + LVI
+            serp_df = st.session_state.get("serp_df", pd.DataFrame())
+            shp = serp_score_hint(serp_df, domain) if domain else 60
+            kpi = compute_kpis(res, serp_score_hint=shp)
+            st.session_state["kpi"] = kpi
+
+            st.subheader("KPI Scores (0–100) and Overall LVI")
+            kpi_df = pd.DataFrame([kpi])
+            st.dataframe(kpi_df, use_container_width=True)
+
+            # Persist a tiny history log (per site/url)
+            ts = datetime.datetime.utcnow().isoformat()
+            hist_path = DATA_DIR / "lvi_history.csv"
+            row = {
+                "timestamp": ts, "domain": domain or "", "url": target_url,
+                **kpi
+            }
+            if hist_path.exists():
+                pd.concat([pd.read_csv(hist_path), pd.DataFrame([row])]).to_csv(hist_path, index=False)
+            else:
+                pd.DataFrame([row]).to_csv(hist_path, index=False)
+
+            # Show recent runs
+            st.caption("Recent LVI runs")
+            try:
+                hist = pd.read_csv(hist_path).tail(10)
+                st.dataframe(hist, use_container_width=True)
+            except Exception:
+                pass
+
+# --- LLM Plan ---
 if run_plan:
     if not target_url and not domain:
         st.error("Provide at least a domain or a specific URL.")
@@ -92,7 +133,7 @@ if run_plan:
             url=target_url or f"https://{domain}",
             page_title=res.get("title",""),
             h1_count=res.get("h1_count",0),
-            lvi=res.get("lvi",0),
+            lvi=st.session_state.get("kpi",{}).get("lvi", res.get("lvi",0)),
             target_keywords=kw_list[:5]
         )
 
@@ -122,16 +163,16 @@ if run_plan:
         st.code(plan["faq_jsonld"] or "// No JSON-LD generated — check OPENAI_API_KEY", language="json")
 
         # Download bundle
-        md_bundle = io.StringIO()
-        md_bundle.write(f"# LLMSEO Plan for {domain or target_url}\n\n")
-        md_bundle.write(f"**Title:** {plan['suggested_title']}\n\n")
-        md_bundle.write(f"**Meta:** {plan['suggested_meta']}\n\n")
-        md_bundle.write("## FAQs\n")
-        md_bundle.write(plan["faqs_md"])
-        md_bundle.write("\n\n## FAQPage JSON-LD\n```json\n")
-        md_bundle.write(plan["faq_jsonld"])
-        md_bundle.write("\n```\n")
+        md = io.StringIO()
+        md.write(f"# LLMSEO Plan for {domain or target_url}\n\n")
+        md.write(f"**Title:** {plan['suggested_title']}\n\n")
+        md.write(f"**Meta:** {plan['suggested_meta']}\n\n")
+        md.write("## FAQs\n")
+        md.write(plan["faqs_md"])
+        md.write("\n\n## FAQPage JSON-LD\n```json\n")
+        md.write(plan["faq_jsonld"])
+        md.write("\n```\n")
         st.download_button("⬇️ Download Plan (Markdown)",
-                           md_bundle.getvalue().encode("utf-8"),
+                           md.getvalue().encode("utf-8"),
                            file_name="llmseo_plan.md", mime="text/markdown")
 

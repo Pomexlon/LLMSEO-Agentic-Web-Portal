@@ -1,4 +1,4 @@
-# seo_audit_agent.py
+# seo_audit_agent.py  (same top as you already have)
 import os, json, re, requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 CRAWLBASE_TOKEN = os.getenv("CRAWLBASE_TOKEN")
 
 def fetch_html(url: str) -> str:
-    """Fetch HTML using Crawlbase if token exists; fallback to direct requests."""
     try:
         if CRAWLBASE_TOKEN:
             api = "https://api.crawlbase.com/"
@@ -33,16 +32,13 @@ def audit_url(url: str) -> dict:
     m = soup.find("meta", attrs={"name":"description"})
     if m and m.get("content"): meta_desc = m["content"].strip()
 
-    # Headings
     h1s = [h.get_text(strip=True) for h in soup.find_all("h1")]
     h2s = [h.get_text(strip=True) for h in soup.find_all("h2")]
 
-    # Images + alt coverage
     imgs = soup.find_all("img")
     imgs_with_alt = [i for i in imgs if i.get("alt")]
     alt_pct = _percent(len(imgs_with_alt), len(imgs))
 
-    # Links (internal vs external)
     a_tags = soup.find_all("a", href=True)
     host = urlparse(url).netloc.lower()
     internal, external = 0, 0
@@ -55,7 +51,6 @@ def audit_url(url: str) -> dict:
         else:
             external += 1
 
-    # JSON-LD presence
     ld_scripts = soup.find_all("script", type="application/ld+json")
     ld_types = []
     for s in ld_scripts:
@@ -71,47 +66,40 @@ def audit_url(url: str) -> dict:
         except Exception:
             pass
 
-    # Simple LVI subscores (prototype) — weights sum to 100
+    # Prototype subscores (for display only)
     score = 0
     details = {}
-
-    # 1) Semantic HTML (20)
     sem = 0
     if len(h1s) == 1: sem += 10
     if len(h2s) >= 2: sem += 10
     score += sem; details["semantic_html"] = sem
 
-    # 2) Schema presence (20)
     sch = 0
     if ld_types:
-        sch = min(20, 5*len(set(ld_types)))  # crude approximation
+        sch = min(20, 5*len(set(ld_types)))
     score += sch; details["schema"] = sch
 
-    # 3) Answer blocks (20) -> look for Q/A pattern or FAQ heading
     ans = 0
     text = soup.get_text(" ", strip=True).lower()
     if ("faq" in text) or re.search(r"\b(q:|question:|answer:|a:)\b", text):
         ans = 15
-    if len(text.split()) > 500:  # some content depth
+    if len(text.split()) > 500:
         ans += 5
     score += min(ans,20); details["answer_blocks"] = min(ans,20)
 
-    # 4) Tables/specs (10)
     tbl = 10 if soup.find("table") else 0
     score += tbl; details["tables_specs"] = tbl
 
-    # 5) E-E-A-T signals (10) — rough heuristic
     eeat = 0
     if "last updated" in text or "date modified" in text: eeat += 5
     if re.search(r"(author|medically reviewed|reviewed by)", text): eeat += 5
     score += eeat; details["eeat"] = eeat
 
-    # 6) Internal linking (10)
     il = 10 if internal >= 10 else (5 if internal >= 3 else 0)
     score += il; details["internal_links"] = il
 
-    # 7) Off-site mentions (10) — unknown from single page => 0 (Phase 2 will add)
     details["offsite"] = 0
+    lvi_proto = max(0, min(100, score))
 
     return {
         "url": url,
@@ -124,7 +112,7 @@ def audit_url(url: str) -> dict:
         "internal_links": internal,
         "external_links": external,
         "jsonld_types": list(set(ld_types)),
-        "lvi": max(0, min(100, score)),
+        "lvi": lvi_proto,
         "lvi_breakdown": details
     }
 
