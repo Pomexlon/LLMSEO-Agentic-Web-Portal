@@ -1,0 +1,61 @@
+{
+  "brand": "ASI-C",
+  "site": "https://www.asi-c.co.uk",
+  "keywords": [
+    "agentic ai consulting",
+    "llm integration strategy",
+    "multi-model orchestration",
+    "ai governance and alignment consulting",
+    "ai agent framework design",
+    "enterprise llm deployment",
+    "autonomous workflow agents",
+    "ai-to-ai communication architecture",
+    "structured prompt engineering for businesses",
+    "consulting for foundation models"
+  ],
+  "pages": [
+    {
+      "path": "/",
+      "title": "Agentic AI Consulting | ASI-C – Orchestrating Intelligent Systems",
+      "meta": "Consulting for the Agentic AI era — build, align, and orchestrate LLM systems with ASI-C.",
+      "h1": "Agentic AI Consulting for Enterprise"
+    },
+    {
+      "path": "/services",
+      "title": "LLM Integration & AI Orchestration Services | ASI-C",
+      "meta": "Design and deploy enterprise AI agents, multi-model orchestration, and governance frameworks.",
+      "h1": "LLM Integration & AI Orchestration"
+    },
+    {
+      "path": "/research",
+      "title": "Research Labs | AI-to-AI Communication and Autonomy",
+      "meta": "Explore agentic architectures, SIREN early-warning AI, and multi-model reasoning research.",
+      "h1": "ASI-C Research Labs"
+    },
+    {
+      "path": "/projects",
+      "title": "Enterprise AI Projects | Autonomous Workflow Agents",
+      "meta": "See how ASI-C automates workflows with autonomous AI agents for healthcare, energy, and finance.",
+      "h1": "Projects & Case Studies"
+    },
+    {
+      "path": "/blog",
+      "title": "Agentic AI Insights | Thought Leadership by ASI-C",
+      "meta": "Analysis of GPT-5, Claude, Grok orchestration and applied alignment for enterprise AI.",
+      "h1": "Agentic AI Insights"
+    },
+    {
+      "path": "/about",
+      "title": "About ASI-C | AI Governance and Alignment Experts",
+      "meta": "Meet the team guiding safe, ethical adoption of agentic AI systems worldwide.",
+      "h1": "About ASI-C"
+    },
+    {
+      "path": "/contact",
+      "title": "Contact ASI-C | Start Your AI Strategy",
+      "meta": "Let’s design your AI orchestration roadmap — talk with our agentic consulting specialists.",
+      "h1": "Contact ASI-C"
+    }
+  ]
+}
+

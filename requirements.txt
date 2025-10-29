@@ -12,3 +12,5 @@ plotly
 reportlab
 Pillow
 reportlab
+
+anthropic

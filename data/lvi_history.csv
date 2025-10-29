@@ -1,4 +1,6 @@
-timestamp,domain,url,serp_score,technical_score,content_score,eeat_score,speed_score,lvi
-2025-10-14T22:40:06.703094,www.healthoxygen.com,https://healthoxygen.com/product-category/portable-o2/,40,85,35,10,60,45
-2025-10-15T22:25:16.443782,www.healthoxygen.com,https://healthoxygen.com/product-category/portable-o2/,40,85,35,10,60,45
-2025-10-15T22:27:05.784160,www.healthoxygen.com,https://healthoxygen.com/product-category/portable-o2/,40,85,35,10,60,45
+timestamp,domain,url,serp_score,technical_score,content_score,eeat_score,speed_score,lvi,project
+2025-10-14T22:40:06.703094,www.healthoxygen.com,https://healthoxygen.com/product-category/portable-o2/,40,85,35,10,60,45,
+2025-10-15T22:25:16.443782,www.healthoxygen.com,https://healthoxygen.com/product-category/portable-o2/,40,85,35,10,60,45,
+2025-10-15T22:27:05.784160,www.healthoxygen.com,https://healthoxygen.com/product-category/portable-o2/,40,85,35,10,60,45,
+2025-10-16T21:43:17,www.healthoxygen.com,https://healthoxygen.com/product-category/portable-o2/,40,85,35,5,60,44,
+2025-10-25T23:12:57,www.asi-c.co.uk,https://www.asi-c.co.uk,40,15,0,0,-1,13,ASI-C

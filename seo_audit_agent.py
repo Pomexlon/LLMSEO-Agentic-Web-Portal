@@ -1,13 +1,28 @@
-# seo_audit_agent.py  (same top as you already have)
+# seo_audit_agent.py
 import os, json, re, requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
 CRAWLBASE_TOKEN = os.getenv("CRAWLBASE_TOKEN")
 
-def fetch_html(url: str) -> str:
+def _normalize_url(url: str) -> str:
+    url = (url or "").strip()
+    if not url:
+        return url
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    return url
+
+def _percent(n, d):
+    return 0 if d == 0 else round((n/d)*100, 1)
+
+def fetch_html(url: str, use_crawlbase: bool) -> str:
+    """Fetch HTML using Crawlbase if flagged + token exists, else direct requests."""
+    url = _normalize_url(url)
+    if not url:
+        return "__ERROR__ Missing or invalid URL"
     try:
-        if CRAWLBASE_TOKEN:
+        if use_crawlbase and CRAWLBASE_TOKEN:
             api = "https://api.crawlbase.com/"
             params = {"token": CRAWLBASE_TOKEN, "url": url, "render": "false"}
             r = requests.get(api, params=params, timeout=45)
@@ -18,13 +33,10 @@ def fetch_html(url: str) -> str:
     except Exception as e:
         return f"__ERROR__ {e}"
 
-def _percent(n, d):
-    return 0 if d == 0 else round((n/d)*100, 1)
-
-def audit_url(url: str) -> dict:
-    html = fetch_html(url)
+def audit_url(url: str, use_crawlbase: bool = False) -> dict:
+    html = fetch_html(url, use_crawlbase)
     if html.startswith("__ERROR__"):
-        return {"url": url, "error": html.replace("__ERROR__ ", ""), "lvi": 0}
+        return {"url": _normalize_url(url), "error": html.replace("__ERROR__ ", ""), "lvi": 0}
 
     soup = BeautifulSoup(html, "html.parser")
     title = (soup.title.string.strip() if soup.title and soup.title.string else "")
@@ -32,25 +44,29 @@ def audit_url(url: str) -> dict:
     m = soup.find("meta", attrs={"name":"description"})
     if m and m.get("content"): meta_desc = m["content"].strip()
 
+    # Headings
     h1s = [h.get_text(strip=True) for h in soup.find_all("h1")]
     h2s = [h.get_text(strip=True) for h in soup.find_all("h2")]
 
+    # Images + alt coverage
     imgs = soup.find_all("img")
     imgs_with_alt = [i for i in imgs if i.get("alt")]
     alt_pct = _percent(len(imgs_with_alt), len(imgs))
 
+    # Links (internal vs external)
     a_tags = soup.find_all("a", href=True)
-    host = urlparse(url).netloc.lower()
+    host = urlparse(_normalize_url(url)).netloc.lower()
     internal, external = 0, 0
     for a in a_tags:
         href = a["href"]
         if href.startswith("#"): continue
-        if href.startswith("mailto:") or href.startswith("tel:"): continue
+        if href.startswith(("mailto:", "tel:")): continue
         if href.startswith("/") or host in href.lower():
             internal += 1
         else:
             external += 1
 
+    # JSON-LD presence
     ld_scripts = soup.find_all("script", type="application/ld+json")
     ld_types = []
     for s in ld_scripts:
@@ -66,7 +82,7 @@ def audit_url(url: str) -> dict:
         except Exception:
             pass
 
-    # Prototype subscores (for display only)
+    # Prototype subscores (weights 0..100 total)
     score = 0
     details = {}
     sem = 0
@@ -102,7 +118,7 @@ def audit_url(url: str) -> dict:
     lvi_proto = max(0, min(100, score))
 
     return {
-        "url": url,
+        "url": _normalize_url(url),
         "title": title,
         "meta_description": meta_desc,
         "h1_count": len(h1s),

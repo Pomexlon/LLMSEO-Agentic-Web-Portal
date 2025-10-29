@@ -1,49 +1,15 @@
 # app.py
-import os, io, json, datetime, pathlib, zipfile
+import os, io, json, datetime
 from pathlib import Path
 from dotenv import load_dotenv
-from llm_plan_helper import build_llm_plan as _build_llm_plan
 
 APP_DIR = Path(__file__).resolve().parent
 load_dotenv(APP_DIR / ".env", override=True)
 load_dotenv(APP_DIR / ".env.local", override=True)
 
-# ---------- Project helpers ----------
-PROJECTS_DIR = (APP_DIR / "data")
-PROJECTS_DIR.mkdir(exist_ok=True)
-
-def proj_dir(name: str) -> Path:
-    d = PROJECTS_DIR / name
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-def pack_path(name: str) -> Path:
-    return proj_dir(name) / "seo_pack.json"
-
-def lvi_path(name: str) -> Path:
-    return proj_dir(name) / "lvi_history.csv"
-
-def load_pack(project: str) -> dict:
-    p = pack_path(project)
-    if p.exists():
-        try:
-            return json.loads(p.read_text())
-        except Exception:
-            return {}
-    return {}
-
-def save_pack(project: str, pack: dict) -> None:
-    p = pack_path(project)
-    p.write_text(json.dumps(pack, indent=2))
-
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import json
-import zipfile
-# default: if sidebar hasn't set it yet
-if "use_crawlbase" not in st.session_state:
-    st.session_state["use_crawlbase"] = False
 
 from semrush_agent import get_domain_overview, get_domain_top_keywords
 from serp_agent import run_serp_queries, run_serp_compare
@@ -52,7 +18,6 @@ from llmseo_agent import draft_titles_and_meta, draft_faqs_and_schema
 from kpi_scoring import compute_kpis, serp_score_from_df, combine_lvi
 from pagespeed_agent import fetch_lighthouse_perf
 from report_export import build_pdf
-from llm_plan_helper import build_llm_plan as _build_llm_plan
 
 # ---------- helpers ----------
 def get_secret(name: str, default: str = ""):
@@ -108,188 +73,6 @@ st.title("🚀 LLMSEO Agentic Web Portal")
 st.caption("Enter a project, domain and keywords to run SERP, on-page audits, KPIs, LVI %, and LLM-powered recommendations.")
 
 with st.sidebar:
-    # ---------- LVI Snapshot (local) ----------
-    st.markdown("### LVI Snapshot")
-    st.caption("Run SERP + PSI once and append to this project's history (no cron).")
-
-    if st.button("▶️ Run Snapshot Now", key="run_snapshot_now_btn"):
-        try:
-            active_project = st.session_state.get("project", "DemoProject")
-            domain_in = st.session_state.get("domain_cache", "") or st.session_state.get("domain", "")
-            url_in = st.session_state.get("target_url_cache", "") or st.session_state.get("target_url", "")
-            pack = st.session_state.get("seo_pack", {})
-
-            # keywords source: SEO pack first, fallback to textarea cache
-            kws = []
-            if isinstance(pack.get("keywords"), list):
-                kws = [k for k in pack["keywords"] if k]
-            else:
-                kws = [k.strip() for k in (st.session_state.get("keywords_text","")).splitlines() if k.strip()]
-
-            if not domain_in or not kws:
-                st.error("Please set a domain and at least one keyword (SEO Pack or keywords textarea).")
-            else:
-                from serp_agent import run_serp_queries
-                from kpi_scoring import compute_kpis, serp_score_from_df, combine_lvi
-                from pagespeed_agent import fetch_lighthouse_perf
-                import pandas as pd, datetime
-
-                # SERP
-                rows = run_serp_queries(domain_in, kws[:5], gl="uk")
-                df = pd.DataFrame(rows)
-                serp_score = serp_score_from_df(df, domain_in)
-
-                # PSI
-                psi_score, _ = fetch_lighthouse_perf(url_in or f"https://{domain_in}", strategy="mobile")
-
-                # KPI + LVI
-                res = {"title": "Snapshot", "h1_count": 1}
-                kpi = compute_kpis(res, serp_score)
-                if psi_score >= 0:
-                    kpi["speed_score"] = psi_score
-                    kpi["lvi"] = combine_lvi(
-                        kpi["serp_score"],
-                        kpi["technical_score"],
-                        kpi["content_score"],
-                        kpi["eeat_score"],
-                        kpi["speed_score"],
-                    )
-
-                # Append to per-project CSV
-                from pathlib import Path
-                APP_DIR = Path(__file__).resolve().parent
-                hist_csv = APP_DIR / "data" / active_project / "lvi_history.csv"
-                hist_csv.parent.mkdir(parents=True, exist_ok=True)
-
-                ts = datetime.datetime.utcnow().isoformat(timespec="seconds")
-                row = {"timestamp": ts, "project": active_project, "domain": domain_in, "url": url_in or f"https://{domain_in}", **kpi}
-                if hist_csv.exists():
-                    pd.concat([pd.read_csv(hist_csv), pd.DataFrame([row])]).to_csv(hist_csv, index=False)
-                else:
-                    pd.DataFrame([row]).to_csv(hist_csv, index=False)
-
-                st.success(f"✅ Snapshot saved to {hist_csv}")
-        except Exception as e:
-            st.error(f"Snapshot error: {e}")
-
-    # ---------- Latest 10 LVI runs ----------
-    st.markdown("### Recent LVI (last 10)")
-    try:
-        from pathlib import Path
-        import pandas as pd
-        APP_DIR = Path(__file__).resolve().parent
-        active_project = st.session_state.get("project", "DemoProject")
-        hist_csv = APP_DIR / "data" / active_project / "lvi_history.csv"
-        if hist_csv.exists():
-            hist = pd.read_csv(hist_csv).tail(10)
-            if not hist.empty:
-                chart_df = hist[["timestamp","lvi"]].set_index("timestamp")
-                st.line_chart(chart_df, height=160)
-                st.dataframe(hist, use_container_width=True)
-            else:
-                st.info("No entries yet — run a snapshot.")
-        else:
-            st.info("No history file yet — run a snapshot.")
-    except Exception as e:
-        st.error(f"LVI panel error: {e}")
-
-# ---------- Project selection ----------
-st.markdown("### Fetch Settings")
-st.session_state["use_crawlbase"] = st.checkbox(
-    "Use Crawlbase for fetching (if token present)",
-    value=bool(os.getenv("CRAWLBASE_TOKEN"))
-)
-    st.markdown("### Project")
-# discover existing
-    existing_projects = sorted([p.name for p in PROJECTS_DIR.glob("*") if p.is_dir()])
-    project_choice = st.selectbox("Select project", options=["<new>"] + existing_projects, index=0, key="project_select")
-    new_project_name = st.text_input("New project name", value="DemoProject", key="project_new_name")
-
-    if st.button("Use Project"):
-        st.session_state["project"] = (new_project_name if project_choice == "<new>" else project_choice)
-        st.success(f"✅ Project set to: {st.session_state['project']}")
-
-# if not set yet, default
-active_project = st.session_state.get("project", new_project_name)
-
-# SEO pack load/save (from/to disk)
-st.markdown("### SEO Pack")
-uploaded_json = st.file_uploader("Upload SEO Pack (.json)", type=["json"], key="seo_pack_uploader")
-if uploaded_json is not None:
-    try:
-        st.session_state["seo_pack"] = json.load(uploaded_json)
-        st.success("✅ SEO pack loaded into session")
-    except Exception as e:
-        st.error(f"Load error: {e}")
-
-if st.button("💾 Save SEO Pack to disk"):
-    pack = st.session_state.get("seo_pack", {})
-    if not pack:
-        st.warning("No SEO pack in session to save.")
-    else:
-        save_pack(active_project, pack)
-        st.success(f"✅ Saved SEO pack under project: {active_project}")
-
-if st.button("📂 Load SEO Pack from disk"):
-    pack = load_pack(active_project)
-    if pack:
-        st.session_state["seo_pack"] = pack
-        st.success(f"✅ Loaded SEO pack for project: {active_project}")
-    else:
-        st.warning("No saved pack found for this project yet.")
-
-# ---------- Automation (Local, no cron) ----------
-st.markdown("### Automation (Local)")
-st.caption("Run a one-click snapshot (SERP + PSI) and append to the project's LVI history CSV.")
-if st.button("▶️ Run Snapshot Now"):
-    # gather inputs for snapshot
-    domain_in = st.session_state.get("domain_cache", "") or st.session_state.get("domain", "")
-    url_in = st.session_state.get("target_url_cache", "") or st.session_state.get("target_url", "")
-    pack = st.session_state.get("seo_pack", {})
-    kws = []
-    if pack and isinstance(pack.get("keywords"), list):
-        kws = [k for k in pack["keywords"] if k]
-    else:
-        # fallback: use the textarea keywords if present
-        try:
-            kws = [k.strip() for k in (st.session_state.get("keywords_text", "")).splitlines() if k.strip()]
-        except Exception:
-            kws = []
-
-    if not domain_in or not kws:
-        st.error("Please set a domain and at least one keyword (either via SEO Pack or textarea).")
-    else:
-        try:
-            # Run SERP
-            rows = run_serp_queries(domain_in, kws[:5], gl="uk")
-            df = pd.DataFrame(rows)
-            serp_score = serp_score_from_df(df, domain_in)
-
-            # PSI
-            psi_score, _ = fetch_lighthouse_perf(url_in or f"https://{domain_in}", strategy="mobile")
-
-            # KPI + LVI
-            res = {"title": "Snapshot", "h1_count": 1}
-            kpi = compute_kpis(res, serp_score)
-            if psi_score >= 0:
-                kpi["speed_score"] = psi_score
-                kpi["lvi"] = combine_lvi(
-                    kpi["serp_score"], kpi["technical_score"], kpi["content_score"],
-                    kpi["eeat_score"], kpi["speed_score"]
-                )
-
-            # Append to per-project CSV
-            ts = datetime.datetime.utcnow().isoformat(timespec="seconds")
-            row = {"timestamp": ts, "project": active_project, "domain": domain_in, "url": url_in or f"https://{domain_in}", **kpi}
-            hist_csv = lvi_path(active_project)
-            if hist_csv.exists():
-                pd.concat([pd.read_csv(hist_csv), pd.DataFrame([row])]).to_csv(hist_csv, index=False)
-            else:
-                pd.DataFrame([row]).to_csv(hist_csv, index=False)
-
-            st.success(f"✅ Snapshot saved to {hist_csv}")
-        except Exception as e:
-            st.error(f"Snapshot error: {e}")
     st.subheader("Environment")
     st.write("**OPENAI_API_KEY**:", "✅ set" if get_secret("OPENAI_API_KEY") else "⚠️ missing")
     st.write("**SERPAPI_KEY**:", "✅ set" if get_secret("SERPAPI_KEY") else "⚠️ missing")
@@ -299,12 +82,6 @@ if st.button("▶️ Run Snapshot Now"):
     st.markdown("Keep keys in `.env` locally or in **Settings → Edit secrets** on Streamlit Cloud.")
     use_crawlbase = st.checkbox("Use Crawlbase for fetching", value=bool(os.getenv("CRAWLBASE_TOKEN")))
     engine = st.selectbox("LLM engine", ["OpenAI (default)", "Claude (Anthropic)", "Grok (xAI)"], index=0)
-st.markdown("### Upload / Load SEO Pack")
-uploaded_json = st.file_uploader("Upload SEO Pack (.json)", type=["json"])
-if uploaded_json is not None:
-    seo_pack = json.load(uploaded_json)
-    st.session_state["seo_pack"] = seo_pack
-    st.success("✅ SEO pack loaded successfully!")
 
 top1, top2 = st.columns([2,1])
 with top1:
@@ -343,23 +120,6 @@ if "kpi" not in st.session_state: st.session_state["kpi"] = {}
 if "plan" not in st.session_state: st.session_state["plan"] = {}
 if "gauge_nonce" not in st.session_state: st.session_state["gauge_nonce"] = 0
 
-# ---------- Generate LLM Plan ----------
-if run_plan:
-    kw_list = [k.strip() for k in keywords.splitlines() if k.strip()]
-    res = st.session_state.get("audit_result") or {}
-    kpi = st.session_state.get("kpi", {})
-
-    plan = _build_llm_plan(engine, domain, target_url, kw_list, res, kpi)
-    st.session_state["plan"] = plan
-
-    st.subheader("LLM Recommendations")
-    st.markdown(f"**Suggested Title:** {plan.get('suggested_title','')}")
-    st.markdown(f"**Meta Description:** {plan.get('suggested_meta','')}")
-    st.markdown("### FAQs (Markdown)")
-    st.markdown(plan.get("faqs_md","") or "_(No FAQs generated — check your engine key)_")
-    st.markdown("### FAQPage JSON-LD")
-    st.code(plan.get("faq_jsonld","") or "// No JSON-LD generated — check your engine key", language="json")
-
 # ---------- One-click Snapshot ----------
 if snapshot:
     # run SERP if empty
@@ -373,8 +133,7 @@ if snapshot:
     # run Audit if missing
     res = st.session_state.get("audit_result") or {}
     if not res and target_url:
-        use_cb = st.session_state.get("use_crawlbase", False)
-        res = audit_url(target_url, use_crawlbase=use_cb)
+        res = audit_url(target_url, use_crawlbase=use_crawlbase)
         st.session_state["audit_result"] = res
 
     # compute KPIs + PSI
@@ -556,9 +315,9 @@ if run_audit:
             conv_path = ddir / "conversions.csv"
             cc1, cc2, cc3 = st.columns([1,1,2])
             with cc1:
-                 conv_val = st.number_input("Leads/Sales this week", min_value=0, step=1, value=0, key="leads_sales_input")
+                conv_val = st.number_input("Leads/Sales this week", min_value=0, step=1, value=0)
             with cc2:
-                save_conv = st.button("Save conversions", key="save_conversions_button_main")
+                save_conv = st.button("Save conversions")
             if save_conv:
                 conv_row = {
                     "timestamp": ts, "project": project, "domain": domain or "", "url": target_url,
@@ -705,7 +464,7 @@ if run_audit:
             with cc1:
                 conv_val = st.number_input("Leads/Sales this week", min_value=0, step=1, value=0)
             with cc2:
-                save_conv2 = st.button("Save conversions", key="save_conversions_button_snapshot")
+                save_conv = st.button("Save conversions")
             if save_conv:
                 conv_row = {
                     "timestamp": ts, "project": project, "domain": domain or "", "url": target_url,
@@ -746,105 +505,4 @@ if download_pdf:
                           brand_title=f"LLMSEO Visibility Report — {project or domain}")
     st.download_button("⬇️ Download Branded PDF", data=pdf_bytes,
                        file_name=f"LLMSEO_{project or 'report'}.pdf", mime="application/pdf")
-
-# ---------- LLM plan helper (engine-aware) ----------
-def _build_llm_plan(engine_label: str, domain: str, target_url: str, keywords: list, audit_row: dict, kpi: dict) -> dict:
-    """
-    Returns a dict: {"suggested_title": ..., "suggested_meta": ..., "faqs_md": ..., "faq_jsonld": ...}
-    Uses OpenAI by default; will use Claude or Grok if those keys are present and engine is selected.
-    """
-    url_for_ai = target_url or (f"https://{domain}" if domain else "")
-    page_title = audit_row.get("title","")
-    h1_count = audit_row.get("h1_count",0)
-    lvi = kpi.get("lvi", audit_row.get("lvi",0))
-    kw_list = keywords[:]
-
-    try:
-        if engine_label.startswith("Claude"):
-            from llm_plugins import claude_titles_and_meta, claude_faqs_and_schema
-            tm = claude_titles_and_meta(url_for_ai, page_title, h1_count, lvi, kw_list)
-            faq_pack = claude_faqs_and_schema(f"{domain} oxygen", kw_list[:3] + [
-                "Can I fly with a portable oxygen concentrator in the UK?",
-                "Portable vs home oxygen concentrators: which is right for me?",
-            ])
-        elif engine_label.startswith("Grok"):
-            from llm_plugins import grok_titles_and_meta, grok_faqs_and_schema
-            tm = grok_titles_and_meta(url_for_ai, page_title, h1_count, lvi, kw_list)
-            faq_pack = grok_faqs_and_schema(f"{domain} oxygen", kw_list[:3] + [
-                "Can I fly with a portable oxygen concentrator in the UK?",
-                "Portable vs home oxygen concentrators: which is right for me?",
-            ])
-        else:
-            # OpenAI (default)
-            from llmseo_agent import draft_titles_and_meta, draft_faqs_and_schema
-            tm = draft_titles_and_meta(url_for_ai, page_title, h1_count, lvi, kw_list)
-            faq_pack = draft_faqs_and_schema(f"{domain} oxygen", kw_list[:3] + [
-                "Can I fly with a portable oxygen concentrator in the UK?",
-                "Portable vs home oxygen concentrators: which is right for me?",
-            ])
-    except Exception as e:
-        # Fallback to OpenAI if plugin keys are missing or call fails
-        import streamlit as st
-        st.warning(f"Engine fallback to OpenAI — {e}")
-        from llmseo_agent import draft_titles_and_meta, draft_faqs_and_schema
-        tm = draft_titles_and_meta(url_for_ai, page_title, h1_count, lvi, kw_list)
-        faq_pack = draft_faqs_and_schema(f"{domain} oxygen", kw_list[:3] + [
-            "Can I fly with a portable oxygen concentrator in the UK?",
-            "Portable vs home oxygen concentrators: which is right for me?",
-        ])
-
-    return {
-        "suggested_title": tm.get("title",""),
-        "suggested_meta": tm.get("meta",""),
-        "faqs_md": faq_pack.get("faqs_md",""),
-        "faq_jsonld": faq_pack.get("faq_jsonld",""),
-    }
-
-# ---------- LLM plan helper (engine-aware) ----------
-def _build_llm_plan(engine_label: str, domain: str, target_url: str, keywords: list, audit_row: dict, kpi: dict) -> dict:
-    import json
-    import streamlit as st
-    url_for_ai = target_url or (f"https://{domain}" if domain else "")
-    page_title = audit_row.get("title","")
-    h1_count = audit_row.get("h1_count",0)
-    lvi = kpi.get("lvi", audit_row.get("lvi",0))
-    kw_list = keywords[:]
-
-    try:
-        if engine_label.startswith("Claude"):
-            from llm_plugins import claude_titles_and_meta, claude_faqs_and_schema
-            tm = claude_titles_and_meta(url_for_ai, page_title, h1_count, lvi, kw_list)
-            faq_pack = claude_faqs_and_schema(f"{domain} oxygen", kw_list[:3] + [
-                "Can I fly with a portable oxygen concentrator in the UK?",
-                "Portable vs home oxygen concentrators: which is right for me?"
-            ])
-        elif engine_label.startswith("Grok"):
-            from llm_plugins import grok_titles_and_meta, grok_faqs_and_schema
-            tm = grok_titles_and_meta(url_for_ai, page_title, h1_count, lvi, kw_list)
-            faq_pack = grok_faqs_and_schema(f"{domain} oxygen", kw_list[:3] + [
-                "Can I fly with a portable oxygen concentrator in the UK?",
-                "Portable vs home oxygen concentrators: which is right for me?"
-            ])
-        else:
-            from llmseo_agent import draft_titles_and_meta, draft_faqs_and_schema
-            tm = draft_titles_and_meta(url_for_ai, page_title, h1_count, lvi, kw_list)
-            faq_pack = draft_faqs_and_schema(f"{domain} oxygen", kw_list[:3] + [
-                "Can I fly with a portable oxygen concentrator in the UK?",
-                "Portable vs home oxygen concentrators: which is right for me?"
-            ])
-    except Exception as e:
-        st.warning(f"Engine fallback to OpenAI — {e}")
-        from llmseo_agent import draft_titles_and_meta, draft_faqs_and_schema
-        tm = draft_titles_and_meta(url_for_ai, page_title, h1_count, lvi, kw_list)
-        faq_pack = draft_faqs_and_schema(f"{domain} oxygen", kw_list[:3] + [
-            "Can I fly with a portable oxygen concentrator in the UK?",
-            "Portable vs home oxygen concentrators: which is right for me?"
-        ])
-
-    return {
-        "suggested_title": tm.get("title",""),
-        "suggested_meta": tm.get("meta",""),
-        "faqs_md": faq_pack.get("faqs_md",""),
-        "faq_jsonld": faq_pack.get("faq_jsonld","")
-    }
 
