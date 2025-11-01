@@ -9,7 +9,8 @@ import plotly.graph_objects as go
 import subprocess
 # Show the file path (helps confirm what the cloud is running)
 try:
-    st.caption(__file__)
+try:
+    st.caption(__file__)   # shows which file the cloud is running
 except Exception:
     pass
 
